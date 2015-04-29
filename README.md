@@ -39,10 +39,10 @@ for i in 0..100000 {
 On my Macbook Air (dual-core 1.7 GHz Intel Core i7), `sync_channel` can perform
 single threaded `send()/recv()` paired operations in ~1μs.  
 
-![Sync Chan PDF](/sync_chan_pdf.svg)
+![Sync Chan PDF](/sync_chan_pdf.png)
 
 `spsc` performs the same test in ~200ns.
-![SPSC PDF](/spsc_pdf.svg)
+![SPSC PDF](/spsc_pdf.png)
 
 A more realistic, although harder test to accurately benchmark, is threaded
 performance.  This test spins up a "listener" thread which attempts to drain
@@ -58,11 +58,11 @@ it is really testing both producer and consumer performance in conjunction.
 
 `sync_channel` scores ~8μs on this test:
 
-![Sync Chan Threaded PDF](/sync_chan_threaded_pdf.svg)
+![Sync Chan Threaded PDF](/sync_chan_threaded_pdf.png)
 
 While `spsc` scores ~160ns:
 
-![SPSC Threaded PDF](/spsc_threaded_pdf.svg)
+![SPSC Threaded PDF](/spsc_threaded_pdf.png)
 
 A second set of benchmarks look at the inverse (secondary thread pushes onto the
 queue continuously, while the main thread pops data off).  The timings are very
