@@ -21,7 +21,7 @@ doctest = false
 [features]
 # no features by default
 default = []
-
+nightly = []
 benchmark = ["criterion", "time"]
 
 [dependencies.time]
