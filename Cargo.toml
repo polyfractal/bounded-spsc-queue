@@ -1,0 +1,33 @@
+[package]
+name = "bounded-spsc-queue"
+version = "0.0.1"
+authors = ["Zachary Tong <zacharyjtong@gmail.com>"]
+license = "Apache-2.0"
+description = "A bounded SPSC queue"
+
+repository = "https://github.com/polyfractal/bounded-spsc-queue"
+homepage = "https://github.com/polyfractal/bounded-spsc-queue"
+documentation = "https://polyfractal.github.io/bounded-spsc-queue/bounded-spsc-queue"
+keywords = ["data-structures"]
+readme = "README.md"
+
+
+
+[lib]
+name = "bounded_spsc_queue"
+test = true
+doctest = false
+
+[features]
+# no features by default
+default = []
+
+benchmark = ["criterion", "time"]
+
+[dependencies.time]
+time = "*"
+optional = true
+
+[dependencies.criterion]
+git = "https://github.com/japaric/criterion.rs.git"
+optional = true

@@ -1,0 +1,18 @@
+language: rust
+rust:
+- nightly
+before_script:
+- git clone --depth 1 https://github.com/huonw/travis-cargo
+- ln -s ./travis-cargo/travis-cargo.py tc
+script:
+- |
+  tc cargo build &&
+  tc cargo test &&
+  tc cargo bench &&
+  tc --only beta cargo doc
+after_success:
+- tc --only beta doc-upload
+env:
+  global:
+  - TRAVIS_CARGO_NIGHTLY_FEATURE=nightly
+  - secure: hJGlmMnuuwl2C4UvCzt6jr0u7OGuGef6aaNTISa2DMbYOdIaeei2ZKIQMyCOCag5fp7QHJbfKBA7P/5BGsOa1YC7aeBa3M5gSshNpwmocEeSbS5KaieUe2HPbxliEXZMO7A0C/7TcuydJApzBljF8t6nLglckVsLCUZxPaqnpew=
