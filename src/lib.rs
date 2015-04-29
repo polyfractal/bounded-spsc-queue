@@ -1,6 +1,5 @@
 
 #![feature(core, alloc, box_syntax)]
-#![cfg_attr(test, feature(std_misc))]
 
 extern crate core;
 extern crate alloc;
@@ -472,9 +471,11 @@ mod tests {
 
     use super::*;
     use std::thread;
-    use std::sync::mpsc::sync_channel;
 
+    #[cfg(feature = "benchmark")] use std::sync::mpsc::sync_channel;
     #[cfg(feature = "benchmark")] use criterion::{Bencher, Criterion};
+    #[cfg(feature = "benchmark")] use std::sync::atomic::{AtomicBool, Ordering};
+    #[cfg(feature = "benchmark")] use std::sync::Arc;
     //#[cfg(feature = "benchmark")] use std::time::Duration;
 
     #[test]
@@ -530,7 +531,7 @@ mod tests {
         let (p, c) = super::make(10);
 
         match c.try_pop() {
-            Some(v) => {
+            Some(_) => {
                 assert!(false, "Queue was empty but a value was read!")
             },
             None => {}
@@ -544,7 +545,7 @@ mod tests {
         }
 
         match c.try_pop() {
-            Some(v) => {
+            Some(_) => {
                 assert!(false, "Queue was empty but a value was read!")
             },
             None => {}
@@ -557,7 +558,7 @@ mod tests {
 
         thread::spawn(move|| {
             for i in 0..100000 {
-                p.push(i as u32);
+                p.push(i);
             }
         });
 
@@ -577,6 +578,64 @@ mod tests {
     }
 
     #[cfg(feature = "benchmark")]
+    fn bench_chan_threaded(b: &mut Bencher) {
+        let (tx, rx) = sync_channel::<u8>(500);
+        let flag = AtomicBool::new(false);
+        let arc_flag = Arc::new(flag);
+
+        let flag_clone = arc_flag.clone();
+        thread::spawn(move|| {
+            while flag_clone.load(Ordering::Acquire) == false {
+                // Try to do as much work as possible without checking the atomic
+                for _ in 0..400 {
+                    rx.recv().unwrap();
+                }
+            }
+        });
+
+        b.iter(|| {
+            tx.send(1)
+        });
+
+        let flag_clone = arc_flag.clone();
+        flag_clone.store(true, Ordering::Release);
+
+        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
+        for _ in 0..400 {
+            tx.send(1);
+        }
+    }
+
+    #[cfg(feature = "benchmark")]
+    fn bench_chan_threaded2(b: &mut Bencher) {
+        let (tx, rx) = sync_channel::<u8>(500);
+        let flag = AtomicBool::new(false);
+        let arc_flag = Arc::new(flag);
+
+        let flag_clone = arc_flag.clone();
+        thread::spawn(move|| {
+            while flag_clone.load(Ordering::Acquire) == false {
+                // Try to do as much work as possible without checking the atomic
+                for _ in 0..400 {
+                    tx.send(1);
+                }
+            }
+        });
+
+        b.iter(|| {
+            rx.recv().unwrap()
+        });
+
+        let flag_clone = arc_flag.clone();
+        flag_clone.store(true, Ordering::Release);
+
+        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
+        for _ in 0..400 {
+            rx.try_recv();
+        }
+    }
+
+    #[cfg(feature = "benchmark")]
     fn bench_spsc(b: &mut Bencher) {
         let (p, c) = super::make(500);
 
@@ -586,22 +645,103 @@ mod tests {
         });
     }
 
+    #[cfg(feature = "benchmark")]
+    fn bench_spsc_threaded(b: &mut Bencher) {
+        let (p, c) = super::make(500);
+
+        let flag = AtomicBool::new(false);
+        let arc_flag = Arc::new(flag);
+
+        let flag_clone = arc_flag.clone();
+        thread::spawn(move|| {
+            while flag_clone.load(Ordering::Acquire) == false {
+
+                // Try to do as much work as possible without checking the atomic
+                for _ in 0..400 {
+                    c.pop();
+                }
+            }
+        });
+
+        b.iter(|| {
+            p.push(1)
+        });
+
+        let flag_clone = arc_flag.clone();
+        flag_clone.store(true, Ordering::Release);
+
+        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
+        for _ in 0..400 {
+            p.try_push(1);
+        }
+    }
+
+    #[cfg(feature = "benchmark")]
+    fn bench_spsc_threaded2(b: &mut Bencher) {
+        let (p, c) = super::make(500);
+
+        let flag = AtomicBool::new(false);
+        let arc_flag = Arc::new(flag);
+
+        let flag_clone = arc_flag.clone();
+        thread::spawn(move|| {
+            while flag_clone.load(Ordering::Acquire) == false {
+
+                // Try to do as much work as possible without checking the atomic
+                for _ in 0..400 {
+                    p.push(1);
+                }
+            }
+        });
+
+        b.iter(|| {
+            c.pop()
+        });
+
+        let flag_clone = arc_flag.clone();
+        flag_clone.store(true, Ordering::Release);
+
+        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
+        for _ in 0..400 {
+            c.try_pop();
+        }
+    }
 
     #[cfg(feature = "benchmark")]
     #[test]
-    fn test() {
+    fn bench_single_thread() {
+        Criterion::default()
+            .bench("bench_chan", bench_chan);
+
+        Criterion::default()
+            .bench("bench_spsc", bench_spsc);
+    }
+
+    #[cfg(feature = "benchmark")]
+    #[test]
+    fn bench_threaded() {
+        Criterion::default()
+            .bench("bench_chan", bench_chan_threaded);
+
+        Criterion::default()
+            .bench("bench_spsc", bench_spsc_threaded);
+    }
+
+    #[cfg(feature = "benchmark")]
+    #[test]
+    fn bench_threaded_reverse() {
         Criterion::default()
             //.warm_up_time(Duration::seconds(10))
             //.measurement_time(Duration::seconds(100))
             //.sample_size(100)
             //.nresamples(500000)
-            .bench("bench_chan", bench_chan);
+            .bench("bench_chan", bench_chan_threaded2);
 
         Criterion::default()
             //.warm_up_time(Duration::seconds(10))
             //.measurement_time(Duration::seconds(100))
             //.sample_size(100)
             //.nresamples(500000)
-            .bench("bench_spsc", bench_spsc);
+            .bench("bench_spsc", bench_spsc_threaded2);
     }
 }
