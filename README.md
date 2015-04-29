@@ -7,8 +7,11 @@ This crate provides a very simple bounded, Single-producer Single-consumer (SPSC
 queue for Rust.  It provides a data structure for two threads to communicate
 in one direction with minimal overhead and bounded semantics.
 
-Compared to a `sync_channel` (which is a MPSC queue under the covers), bounded-spsc-queue
-provides a small but consistent speedup.
+Compared to a `sync_channel`, this queue provides a small but consistent
+speedup.  `sync_channel` utilizes an unbounded linked-list data structure under the covers,
+while `bounded_spsc_queue` is a simple ring buffer with single, solid block of allocated
+memory.  The solid block of memory allows better cache pre-fetching due to less pointer
+indirection, and generally simpler operations to achieve a bounded SPSC queue.
 
 ## Documentation
 
