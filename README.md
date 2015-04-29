@@ -10,7 +10,7 @@ provides a small but consistent speedup.
 
 ## Documentation
 
-Documentation can be found here](http://polyfractal.github.io/bounded-spsc-queue/bounded_spsc_queue/index.html)
+[Documentation can be found here](http://polyfractal.github.io/bounded-spsc-queue/bounded_spsc_queue/index.html)
 
 ## Example
 
@@ -39,10 +39,10 @@ for i in 0..100000 {
 On my Macbook Air (dual-core 1.7 GHz Intel Core i7), `sync_channel` can perform
 single threaded `send()/recv()` paired operations in ~1μs.  
 
-![](sync_chan_pdf.png)
+![Sync Chan PDF](/sync_chan_pdf.svg)
 
 `spsc` performs the same test in ~200ns.
-![](spsc_pdf.png)
+![SPSC PDF](/spsc_pdf.svg)
 
 A more realistic, although harder test to accurately benchmark, is threaded
 performance.  This test spins up a "listener" thread which attempts to drain
@@ -58,11 +58,11 @@ it is really testing both producer and consumer performance in conjunction.
 
 `sync_channel` scores ~8μs on this test:
 
-![](sync_chan_threaded_pdf.png)
+![Sync Chan Threaded PDF](/sync_chan_threaded_pdf.svg)
 
 While `spsc` scores ~160ns:
 
-![](spsc_threaded_pdf.png)
+![SPSC Threaded PDF](/spsc_threaded_pdf.svg)
 
 A second set of benchmarks look at the inverse (secondary thread pushes onto the
 queue continuously, while the main thread pops data off).  The timings are very
