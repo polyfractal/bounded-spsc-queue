@@ -194,6 +194,19 @@ impl<T> Buffer<T> {
 /// Handles deallocation of heap memory when the buffer is dropped
 impl<T> Drop for Buffer<T> {
     fn drop(&mut self) {
+
+        // Pop the rest of the values off the queue.  By moving them into this scope,
+        // we implicitly call their destructor
+
+        // TODO this could be optimized to avoid the atomic operations / book-keeping...but
+        // since this is the destructor, there shouldn't be any contention... so meh?
+        loop {
+            match self.try_pop() {
+                Some(_) => {},  // Got a value, keep poppin!
+                None => break   // All done, deallocate mem now
+            }
+        }
+
         unsafe {
             deallocate(self.buffer as *mut u8,
                 self.allocated_size * mem::size_of::<T>(),
