@@ -1,5 +1,5 @@
 
-#![feature(core, alloc, box_syntax)]
+#![feature(core, alloc, box_syntax, optin_builtin_traits)]
 
 extern crate core;
 extern crate alloc;
@@ -58,6 +58,9 @@ pub struct Producer<T> {
 
 unsafe impl<T: Send> Send for Consumer<T> { }
 unsafe impl<T: Send> Send for Producer<T> { }
+
+impl<T> !Sync for Consumer<T> {}
+impl<T> !Sync for Producer<T> {}
 
 impl<T> Buffer<T> {
 
