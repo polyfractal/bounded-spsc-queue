@@ -72,3 +72,7 @@ While `spsc` scores ~160ns:
 A second set of benchmarks look at the inverse (secondary thread pushes onto the
 queue continuously, while the main thread pops data off).  The timings are very
 similar.
+
+Put another way:
+- SPSC performs ~9.25m push operations per second
+- Sync Channel performs ~1.46m operations per second

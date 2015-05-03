@@ -492,7 +492,7 @@ mod tests {
     #[cfg(feature = "benchmark")] use criterion::{Bencher, Criterion};
     #[cfg(feature = "benchmark")] use std::sync::atomic::{AtomicBool, Ordering};
     #[cfg(feature = "benchmark")] use std::sync::Arc;
-    //#[cfg(feature = "benchmark")] use std::time::Duration;
+    #[cfg(feature = "benchmark")] use time::{Duration, PreciseTime};
 
     #[test]
     fn test_producer_push() {
@@ -725,6 +725,52 @@ mod tests {
 
     #[cfg(feature = "benchmark")]
     #[test]
+    fn bench_spsc_throughput() {
+        let iterations: i64 = 2i64.pow(14);
+
+        let (p, c) = super::make(iterations as usize);
+
+        let start = PreciseTime::now();
+        for i in 0..iterations as usize {
+            p.push(i);
+        }
+        let t = c.pop();
+        assert!(t == 0);
+        let end = PreciseTime::now();
+        let throughput = (iterations as f64 / (start.to(end)).num_nanoseconds().unwrap() as f64) * 1000000000f64;
+        println!("Spsc Throughput: {}/s -- (iterations: {} in {} ns)",
+            throughput,
+            iterations,
+            (start.to(end)).num_nanoseconds().unwrap());
+
+
+    }
+
+    #[cfg(feature = "benchmark")]
+    #[test]
+    fn bench_chan_throughput() {
+        let iterations: i64 = 2i64.pow(14);
+
+        let (tx, rx) = sync_channel(iterations as usize);
+
+        let start = PreciseTime::now();
+        for i in 0..iterations as usize {
+            tx.send(i);
+        }
+        let t = rx.recv().unwrap();
+        assert!(t == 0);
+        let end = PreciseTime::now();
+        let throughput = (iterations as f64 / (start.to(end)).num_nanoseconds().unwrap() as f64) * 1000000000f64;
+        println!("Chan Throughput: {}/s -- (iterations: {} in {} ns)",
+            throughput,
+            iterations,
+            (start.to(end)).num_nanoseconds().unwrap());
+
+
+    }
+
+    #[cfg(feature = "benchmark")]
+    //#[test]
     fn bench_single_thread() {
         Criterion::default()
             .bench("bench_chan", bench_chan);
