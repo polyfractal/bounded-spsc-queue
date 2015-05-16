@@ -51,7 +51,7 @@ single threaded `send()/recv()` paired operations in ~1μs.
 
 A more realistic, although harder test to accurately benchmark, is threaded
 performance.  This test spins up a "listener" thread which attempts to drain
-the queue as fast as possible.  It must intermittently check and Atomic flag
+the queue as fast as possible.  It must intermittently check an Atomic flag
 to determine if the test is over, which unfortunately will impact the benchmark results.
 To help alleviate the impact, the listener will only check every 500 iterations.
 
