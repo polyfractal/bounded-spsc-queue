@@ -1,5 +1,5 @@
 
-#![feature(core, alloc, box_syntax, optin_builtin_traits)]
+#![feature(heap_api, oom, alloc, box_syntax, optin_builtin_traits)]
 
 extern crate core;
 extern crate alloc;
@@ -213,7 +213,7 @@ impl<T> Drop for Buffer<T> {
         unsafe {
             deallocate(self.buffer as *mut u8,
                 self.allocated_size * mem::size_of::<T>(),
-                mem::min_align_of::<T>());
+                mem::align_of::<T>());
         }
     }
 }
@@ -292,7 +292,7 @@ unsafe fn allocate_buffer<T>(capacity: usize) -> *mut T {
     let size = adjusted_size.checked_mul(mem::size_of::<T>())
                 .expect("capacity overflow");
 
-    let ptr = allocate(size, mem::min_align_of::<T>()) as *mut T;
+    let ptr = allocate(size, mem::align_of::<T>()) as *mut T;
     if ptr.is_null() { ::alloc::oom() }
     ptr
 }
