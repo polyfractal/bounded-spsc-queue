@@ -7,7 +7,7 @@ description = "A bounded SPSC queue"
 
 repository = "https://github.com/polyfractal/bounded-spsc-queue"
 homepage = "https://github.com/polyfractal/bounded-spsc-queue"
-documentation = "https://polyfractal.github.io/bounded-spsc-queue/bounded-spsc-queue"
+documentation = "https://polyfractal.github.io/bounded-spsc-queue/bounded_spsc_queue/"
 keywords = ["data-structures"]
 readme = "README.md"
 
