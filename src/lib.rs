@@ -799,40 +799,52 @@ mod tests {
     }
 
     #[cfg(feature = "benchmark")]
-    //#[test]
-    fn bench_single_thread() {
+    #[test]
+    fn bench_single_thread_chan() {
         Criterion::default()
-            .bench("bench_chan", bench_chan);
-
-        Criterion::default()
-            .bench("bench_spsc", bench_spsc);
+            .bench_function("bench_single_chan", bench_chan);
     }
 
     #[cfg(feature = "benchmark")]
     #[test]
-    fn bench_threaded() {
+    fn bench_single_thread_spsc() {
         Criterion::default()
-            .bench("bench_chan", bench_chan_threaded);
-
-        Criterion::default()
-            .bench("bench_spsc", bench_spsc_threaded);
+            .bench_function("bench_single_spsc", bench_spsc);
     }
 
     #[cfg(feature = "benchmark")]
     #[test]
-    fn bench_threaded_reverse() {
+    fn bench_threaded_chan() {
+        Criterion::default()
+            .bench_function("bench_threaded_chan", bench_chan_threaded);
+    }
+
+    #[cfg(feature = "benchmark")]
+    #[test]
+    fn bench_threaded_spsc() {
+        Criterion::default()
+            .bench_function("bench_threaded_spsc", bench_spsc_threaded);
+    }
+
+    #[cfg(feature = "benchmark")]
+    #[test]
+    fn bench_threaded_reverse_chan() {
         Criterion::default()
             //.warm_up_time(Duration::seconds(10))
             //.measurement_time(Duration::seconds(100))
             //.sample_size(100)
             //.nresamples(500000)
-            .bench("bench_chan", bench_chan_threaded2);
+            .bench_function("bench_reverse_chan", bench_chan_threaded2);
+    }
 
+    #[cfg(feature = "benchmark")]
+    #[test]
+    fn bench_threaded_reverse_spsc() {
         Criterion::default()
             //.warm_up_time(Duration::seconds(10))
             //.measurement_time(Duration::seconds(100))
             //.sample_size(100)
             //.nresamples(500000)
-            .bench("bench_spsc", bench_spsc_threaded2);
+            .bench_function("bench_reverse_spsc", bench_spsc_threaded2);
     }
 }
