@@ -517,12 +517,6 @@ mod tests {
     use super::*;
     use std::thread;
 
-    #[cfg(feature = "benchmark")] use std::sync::mpsc::sync_channel;
-    #[cfg(feature = "benchmark")] use criterion::{Bencher, Criterion};
-    #[cfg(feature = "benchmark")] use std::sync::atomic::{AtomicBool, Ordering};
-    #[cfg(feature = "benchmark")] use std::sync::Arc;
-    #[cfg(feature = "benchmark")] use time::{Duration, PreciseTime};
-
     #[test]
     fn test_producer_push() {
         let (p, _) = super::make(10);
@@ -798,6 +792,13 @@ mod tests {
 
     }
 
+/*
+    #[cfg(feature = "benchmark")] use std::sync::mpsc::sync_channel;
+    #[cfg(feature = "benchmark")] use criterion::{Bencher, Criterion};
+    #[cfg(feature = "benchmark")] use std::sync::atomic::{AtomicBool, Ordering};
+    #[cfg(feature = "benchmark")] use std::sync::Arc;
+    #[cfg(feature = "benchmark")] use time::{Duration, PreciseTime};
+
     #[cfg(feature = "benchmark")]
     #[test]
     fn bench_single_thread_chan() {
@@ -847,4 +848,5 @@ mod tests {
             //.nresamples(500000)
             .bench_function("bench_reverse_spsc", bench_spsc_threaded2);
     }
+*/
 }

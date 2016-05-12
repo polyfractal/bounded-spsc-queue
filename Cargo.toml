@@ -22,12 +22,12 @@ doctest = false
 # no features by default
 default = []
 nightly = []
-benchmark = ["criterion", "time"]
+#benchmark = ["criterion", "time"]
 
-[dependencies.time]
-version = "0.1.34"
-optional = true
+#[dependencies.time]
+#version = "0.1.34"
+#optional = true
 
-[dependencies.criterion]
-git = "https://github.com/japaric/criterion.rs.git"
-optional = true
+#[dependencies.criterion]
+#git = "https://github.com/japaric/criterion.rs.git"
+#optional = true
