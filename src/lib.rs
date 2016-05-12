@@ -10,11 +10,23 @@ extern crate alloc;
 
 use alloc::heap::{allocate, deallocate};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::usize;
 use std::sync::Arc;
+use std::cell::Cell;
 use core::{mem, ptr};
 use core::mem::transmute;
 
 
+#[cfg(target_pointer_width = "32")]
+macro_rules! cacheline_pad { ($N:expr) => { 16 - $N } }
+
+#[cfg(target_pointer_width = "64")]
+macro_rules! cacheline_pad { ($N:expr) => { 8 - $N } }
+
+/* doesn't work yet: */
+//macro_rules! cacheline_pad {
+//    ($N:expr) => { 64 / std::mem::size_of::<usize>() - $N }
+//}
 
 /// The internal memory buffer used by the queue.
 ///
@@ -24,24 +36,30 @@ use core::mem::transmute;
 #[repr(C)]
 pub struct Buffer<T> {
     /// A pointer to the allocated ring buffer
-    buffer: *mut T,
+    buffer:         *mut T,
 
     /// The bounded size as specified by the user.  If the queue reaches capacity, it will block
     /// until values are poppped off.
-    capacity: usize,
+    capacity:       usize,
 
     /// The allocated size of the ring buffer, in terms of number of values (not physical memory).
     /// This will be the next power of two larger than `capacity`
     allocated_size: usize,
+    _padding1:      [u64;cacheline_pad!(3)],
+
+    /// Consumer cacheline:
 
     /// Index position of the current head
-    head: AtomicUsize,
+    head:           AtomicUsize,
+    shadow_tail:    Cell<usize>,
+    _padding2:      [u64;cacheline_pad!(2)],
 
-    /// Padding to prevent false sharing beween cache lines
-    _padding: [u64;8],
+    /// Producer cacheline:
 
     /// Index position of current tail
-    tail: AtomicUsize
+    tail:           AtomicUsize,
+    shadow_head:    Cell<usize>,
+    _padding3:      [u64;cacheline_pad!(2)],
 }
 
 unsafe impl<T: Sync> Sync for Buffer<T> { }
@@ -81,16 +99,18 @@ impl<T> Buffer<T> {
     /// }
     /// ```
     pub fn try_pop(&self) -> Option<T> {
-        let current_head = self.head.load(Ordering::Acquire);
+        let current_head = self.head.load(Ordering::Relaxed);
 
-        if current_head == self.tail.load(Ordering::Acquire) {
-            None
-        } else {
-            let v = unsafe { ptr::read(self.load(current_head as isize)) };
-            self.head.fetch_add(1, Ordering::Release);
-            Some(v)
+        if current_head == self.shadow_tail.get() {
+            self.shadow_tail.set(self.tail.load(Ordering::Acquire));
+            if current_head == self.shadow_tail.get() {
+                return None;
+            }
         }
 
+        let v = unsafe { ptr::read(self.load(current_head)) };
+        self.head.store(current_head.wrapping_add(1), Ordering::Release);
+        Some(v)
     }
 
     /// Pop a value off the buffer.
@@ -132,15 +152,18 @@ impl<T> Buffer<T> {
     /// }
     /// ```
     pub fn try_push(&self, v: T) -> Option<T> {
-        let current_tail = self.tail.load(Ordering::Acquire);
+        let current_tail = self.tail.load(Ordering::Relaxed);
 
-        return if self.head.load(Ordering::Acquire) + self.capacity <= current_tail {
-            Some(v)
-        } else {
-            unsafe { self.store((current_tail) as isize, v); }
-            self.tail.fetch_add(1, Ordering::Release);
-            None
+        if self.shadow_head.get() + self.capacity <= current_tail {
+            self.shadow_head.set(self.head.load(Ordering::Relaxed));
+            if self.shadow_head.get() + self.capacity <= current_tail {
+                return Some(v);
+            }
         }
+
+        unsafe { self.store(current_tail, v); }
+        self.tail.store(current_tail.wrapping_add(1), Ordering::Release);
+        None
     }
 
     /// Push a value onto the buffer.
@@ -177,8 +200,8 @@ impl<T> Buffer<T> {
     /// The caller can use either absolute or monotonically increasing index positions, since
     /// buffer wrapping is handled inside the method.
     #[inline]
-    unsafe fn load(&self, pos: isize) -> &T {
-        transmute(self.buffer.offset(pos & (self.allocated_size as isize - 1)))
+    unsafe fn load(&self, pos: usize) -> &T {
+        transmute(self.buffer.offset((pos & (self.allocated_size - 1)) as isize))
     }
 
     /// Store a value in the buffer
@@ -188,8 +211,8 @@ impl<T> Buffer<T> {
     /// This method assumes the caller has:
     /// - Initialized a valid block of memory
     #[inline]
-    unsafe fn store(&self, pos: isize, v: T) {
-        let end = self.buffer.offset(pos & (self.allocated_size as isize - 1));
+    unsafe fn store(&self, pos: usize, v: T) {
+        let end = self.buffer.offset((pos & (self.allocated_size - 1)) as isize);
         ptr::write(&mut *end, v);
     }
 }
@@ -278,9 +301,15 @@ pub fn make<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
         buffer: ptr,
         capacity: capacity,
         allocated_size: capacity.next_power_of_two(),
-        head: AtomicUsize::new(0),
-        _padding: [0; 8],
-        tail: AtomicUsize::new(0)
+        _padding1:      [0; cacheline_pad!(3)],
+
+        head:           AtomicUsize::new(0),
+        shadow_tail:    Cell::new(0),
+        _padding2:      [0; cacheline_pad!(2)],
+
+        tail:           AtomicUsize::new(0),
+        shadow_head:    Cell::new(0),
+        _padding3:      [0; cacheline_pad!(2)],
     });
 
     (Producer { buffer: arc.clone() }, Consumer { buffer: arc.clone() })
