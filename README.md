@@ -42,11 +42,11 @@ for i in 0..100000 {
 
 ## Semi-scientific Benchmarks
 On my Macbook Air (dual-core 1.7 GHz Intel Core i7), `sync_channel` can perform
-single threaded `send()/recv()` paired operations in ~1μs.  
+single threaded `send()/recv()` paired operations in ~200ns.  
 
 ![Sync Chan PDF](/sync_chan_pdf.png)
 
-`spsc` performs the same test in ~200ns.
+`spsc` performs the same test in ~10ns.
 ![SPSC PDF](/spsc_pdf.png)
 
 A more realistic, although harder test to accurately benchmark, is threaded
@@ -61,11 +61,11 @@ the producer may stall while waiting for the queue to free a spot.  This test
 should not be viewed as a latency test, but more as a throughput test since
 it is really testing both producer and consumer performance in conjunction.
 
-`sync_channel` scores ~8μs on this test:
+`sync_channel` scores ~6μs on this test:
 
 ![Sync Chan Threaded PDF](/sync_chan_threaded_pdf.png)
 
-While `spsc` scores ~160ns:
+While `spsc` scores ~20ns:
 
 ![SPSC Threaded PDF](/spsc_threaded_pdf.png)
 
@@ -74,5 +74,5 @@ queue continuously, while the main thread pops data off).  The timings are very
 similar.
 
 Put another way:
-- SPSC performs ~9.25m push operations per second
-- Sync Channel performs ~1.46m operations per second
+- SPSC performs ~50m push operations per second
+- Sync Channel performs ~170k operations per second
