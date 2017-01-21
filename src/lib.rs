@@ -115,6 +115,12 @@ impl<T> Buffer<T> {
     /// Attempts to pop (and discard) at most `n` values off the buffer.
     ///
     /// Returns the amount of values successfully skipped.
+    ///
+    /// # Safety
+    ///
+    /// *WARNING:* This will leak at most `n` values from the buffer, i.e. the destructors of the
+    /// objects skipped over will not be called. This function is intended to be used on buffers that
+    /// contain non-`Drop` data, such as a `Buffer<f32>`.
     pub fn skip_n(&self, n: usize) -> usize {
         let current_head = self.head.load(Ordering::Relaxed);
 
@@ -488,6 +494,12 @@ impl<T> Consumer<T> {
     /// Attempts to pop (and discard) at most `n` values off the buffer.
     ///
     /// Returns the amount of values successfully skipped.
+    ///
+    /// # Safety
+    ///
+    /// *WARNING:* This will leak at most `n` values from the buffer, i.e. the destructors of the
+    /// objects skipped over will not be called. This function is intended to be used on buffers that
+    /// contain non-`Drop` data, such as a `Buffer<f32>`.
     ///
     /// # Examples
     ///
