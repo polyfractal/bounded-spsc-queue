@@ -112,6 +112,29 @@ impl<T> Buffer<T> {
         Some(v)
     }
 
+    /// Attempts to pop (and discard) at most `n` values off the buffer.
+    ///
+    /// Returns the amount of values successfully skipped.
+    ///
+    /// # Safety
+    ///
+    /// *WARNING:* This will leak at most `n` values from the buffer, i.e. the destructors of the
+    /// objects skipped over will not be called. This function is intended to be used on buffers that
+    /// contain non-`Drop` data, such as a `Buffer<f32>`.
+    pub fn skip_n(&self, n: usize) -> usize {
+        let current_head = self.head.load(Ordering::Relaxed);
+
+
+        self.shadow_tail.set(self.tail.load(Ordering::Acquire));
+        if current_head == self.shadow_tail.get() {
+            return 0;
+        }
+        let mut diff = self.shadow_tail.get().wrapping_sub(current_head);
+        if diff > n { diff = n }
+        self.head.store(current_head.wrapping_add(diff), Ordering::Release);
+        diff
+    }
+
     /// Pop a value off the buffer.
     ///
     /// This method will block until the buffer is non-empty.  The waiting strategy is a simple
@@ -468,6 +491,29 @@ impl<T> Consumer<T> {
         (*self.buffer).try_pop()
     }
 
+    /// Attempts to pop (and discard) at most `n` values off the buffer.
+    ///
+    /// Returns the amount of values successfully skipped.
+    ///
+    /// # Safety
+    ///
+    /// *WARNING:* This will leak at most `n` values from the buffer, i.e. the destructors of the
+    /// objects skipped over will not be called. This function is intended to be used on buffers that
+    /// contain non-`Drop` data, such as a `Buffer<f32>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bounded_spsc_queue::*;
+    ///
+    /// let (_, consumer) = make(100);
+    ///
+    /// let mut read_position = 0; // current buffer index
+    /// read_position += consumer.skip_n(512); // try to skip at most 512 elements
+    /// ```
+    pub fn skip_n(&self, n: usize) -> usize {
+        (*self.buffer).skip_n(n)
+    }
     /// Returns the total capacity of this queue
     ///
     /// This value represents the total capacity of the queue when it is full.  It does not
@@ -544,6 +590,43 @@ mod tests {
             assert!(c.size() == 9 - i - 1);
             assert!(t == i);
         }
+    }
+
+    #[test]
+    fn test_consumer_skip() {
+        let (p, c) = super::make(10);
+
+        for i in 0..9 {
+            p.push(i);
+            assert!(p.capacity() == 10);
+            assert!(p.size() == i + 1);
+        }
+        assert!(c.size() == 9);
+        assert!(c.skip_n(5) == 5);
+        assert!(c.size() == 4);
+        for i in 0..4 {
+            assert!(c.size() == 4 - i);
+            let t = c.pop();
+            assert!(c.capacity() == 10);
+            assert!(c.size() == 4 - i - 1);
+            assert!(t == i+5);
+        }
+        assert!(c.size() == 0);
+        assert!(c.skip_n(5) == 0);
+    }
+
+    #[test]
+    fn test_consumer_skip_whole_buf() {
+        let (p, c) = super::make(9);
+
+        for i in 0..9 {
+            p.push(i);
+            assert!(p.capacity() == 9);
+            assert!(p.size() == i + 1);
+        }
+        assert!(c.size() == 9);
+        assert!(c.skip_n(9) == 9);
+        assert!(c.size() == 0);
     }
 
     #[test]
