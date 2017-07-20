@@ -1,4 +1,4 @@
-#![feature(heap_api, oom, alloc, box_syntax, optin_builtin_traits)]
+#![feature(allocator_api, alloc, box_syntax, optin_builtin_traits)]
 
 extern crate core;
 extern crate alloc;
@@ -7,7 +7,8 @@ extern crate alloc;
 #[cfg(feature = "benchmark")] extern crate time;
 
 
-use alloc::heap::{allocate, deallocate};
+use alloc::allocator::{Alloc, Layout};
+use alloc::heap::Heap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::usize;
 use std::sync::Arc;
@@ -256,9 +257,8 @@ impl<T> Drop for Buffer<T> {
         }
 
         unsafe {
-            deallocate(self.buffer as *mut u8,
-                self.allocated_size * mem::size_of::<T>(),
-                mem::align_of::<T>());
+            let layout = Layout::from_size_align(self.allocated_size * mem::size_of::<T>(), mem::align_of::<T>()).unwrap();
+            Heap.dealloc(self.buffer as *mut u8, layout);
         }
     }
 }
@@ -343,9 +343,11 @@ unsafe fn allocate_buffer<T>(capacity: usize) -> *mut T {
     let size = adjusted_size.checked_mul(mem::size_of::<T>())
                 .expect("capacity overflow");
 
-    let ptr = allocate(size, mem::align_of::<T>()) as *mut T;
-    if ptr.is_null() { ::alloc::oom() }
-    ptr
+    let layout = Layout::from_size_align(size, mem::align_of::<T>()).unwrap();
+    match Heap.alloc(layout) {
+        Ok(ptr) => ptr as *mut T,
+        Err(e) => Heap.oom(e),
+    }
 }
 
 impl<T> Producer<T> {
