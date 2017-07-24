@@ -45,21 +45,21 @@ pub struct Buffer<T> {
     /// The allocated size of the ring buffer, in terms of number of values (not physical memory).
     /// This will be the next power of two larger than `capacity`
     allocated_size: usize,
-    _padding1:      [u64;cacheline_pad!(3)],
+    _padding1:      [usize; cacheline_pad!(3)],
 
     /// Consumer cacheline:
 
     /// Index position of the current head
     head:           AtomicUsize,
     shadow_tail:    Cell<usize>,
-    _padding2:      [u64;cacheline_pad!(2)],
+    _padding2:      [usize; cacheline_pad!(2)],
 
     /// Producer cacheline:
 
     /// Index position of current tail
     tail:           AtomicUsize,
     shadow_head:    Cell<usize>,
-    _padding3:      [u64;cacheline_pad!(2)],
+    _padding3:      [usize; cacheline_pad!(2)],
 }
 
 unsafe impl<T: Sync> Sync for Buffer<T> { }
