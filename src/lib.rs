@@ -16,12 +16,13 @@ use std::cell::Cell;
 use core::{mem, ptr};
 use core::mem::transmute;
 
+const CACHELINE_LEN: usize = 64;
 
 #[cfg(target_pointer_width = "32")]
-macro_rules! cacheline_pad { ($N:expr) => { 16 - $N } }
+macro_rules! cacheline_pad { ($N:expr) => { CACHELINE_LEN / 4 - $N } }
 
 #[cfg(target_pointer_width = "64")]
-macro_rules! cacheline_pad { ($N:expr) => { 8 - $N } }
+macro_rules! cacheline_pad { ($N:expr) => { CACHELINE_LEN / 8 - $N } }
 
 /* doesn't work yet: */
 //macro_rules! cacheline_pad {
@@ -563,6 +564,11 @@ mod tests {
 
     use super::*;
     use std::thread;
+
+    #[test]
+    fn test_buffer_size() {
+        assert_eq!(::std::mem::size_of::<Buffer<()>>(), 3 * CACHELINE_LEN);
+    }
 
     #[test]
     fn test_producer_push() {
