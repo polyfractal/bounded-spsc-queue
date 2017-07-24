@@ -16,12 +16,13 @@ use std::cell::Cell;
 use core::{mem, ptr};
 use core::mem::transmute;
 
+const CACHELINE_LEN: usize = 64;
 
 #[cfg(target_pointer_width = "32")]
-macro_rules! cacheline_pad { ($N:expr) => { 16 - $N } }
+macro_rules! cacheline_pad { ($N:expr) => { CACHELINE_LEN / 4 - $N } }
 
 #[cfg(target_pointer_width = "64")]
-macro_rules! cacheline_pad { ($N:expr) => { 8 - $N } }
+macro_rules! cacheline_pad { ($N:expr) => { CACHELINE_LEN / 8 - $N } }
 
 /* doesn't work yet: */
 //macro_rules! cacheline_pad {
@@ -45,21 +46,21 @@ pub struct Buffer<T> {
     /// The allocated size of the ring buffer, in terms of number of values (not physical memory).
     /// This will be the next power of two larger than `capacity`
     allocated_size: usize,
-    _padding1:      [u64;cacheline_pad!(3)],
+    _padding1:      [usize; cacheline_pad!(3)],
 
     /// Consumer cacheline:
 
     /// Index position of the current head
     head:           AtomicUsize,
     shadow_tail:    Cell<usize>,
-    _padding2:      [u64;cacheline_pad!(2)],
+    _padding2:      [usize; cacheline_pad!(2)],
 
     /// Producer cacheline:
 
     /// Index position of current tail
     tail:           AtomicUsize,
     shadow_head:    Cell<usize>,
-    _padding3:      [u64;cacheline_pad!(2)],
+    _padding3:      [usize; cacheline_pad!(2)],
 }
 
 unsafe impl<T: Sync> Sync for Buffer<T> { }
@@ -563,6 +564,11 @@ mod tests {
 
     use super::*;
     use std::thread;
+
+    #[test]
+    fn test_buffer_size() {
+        assert_eq!(::std::mem::size_of::<Buffer<()>>(), 3 * CACHELINE_LEN);
+    }
 
     #[test]
     fn test_producer_push() {
