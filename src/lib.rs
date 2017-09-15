@@ -316,7 +316,11 @@ impl<T> Drop for Buffer<T> {
 /// If the requested queue size is larger than available memory (e.g.
 /// `capacity.next_power_of_two() * size_of::<T>() > available memory` ), this function will abort
 /// with an OOM panic.
+///
+/// If the type parameter is a zero-size type.
 pub fn make<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
+
+    assert!(0 < std::mem::size_of::<T>(), "zero-size types are not supported");
 
     let ptr = unsafe { allocate_buffer(capacity) };
 
