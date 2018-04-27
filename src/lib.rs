@@ -1,14 +1,11 @@
-#![feature(allocator_api, alloc, box_syntax, optin_builtin_traits)]
+#![feature(allocator_api)]
 
 extern crate core;
-extern crate alloc;
 
-#[cfg(feature = "benchmark")] extern crate criterion;
-#[cfg(feature = "benchmark")] extern crate time;
-
-
-use alloc::allocator::{Alloc, Layout};
-use alloc::heap::Heap;
+use std::alloc;
+use core::alloc::{Alloc, Layout};
+use std::alloc::Global;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::usize;
 use std::sync::Arc;
@@ -18,16 +15,9 @@ use core::mem::transmute;
 
 const CACHELINE_LEN: usize = 64;
 
-#[cfg(target_pointer_width = "32")]
-macro_rules! cacheline_pad { ($N:expr) => { CACHELINE_LEN / 4 - $N } }
-
-#[cfg(target_pointer_width = "64")]
-macro_rules! cacheline_pad { ($N:expr) => { CACHELINE_LEN / 8 - $N } }
-
-/* doesn't work yet: */
-//macro_rules! cacheline_pad {
-//    ($N:expr) => { 64 / std::mem::size_of::<usize>() - $N }
-//}
+macro_rules! cacheline_pad {
+   ($N:expr) => { CACHELINE_LEN / std::mem::size_of::<usize>() - $N }
+}
 
 /// The internal memory buffer used by the queue.
 ///
@@ -37,7 +27,7 @@ macro_rules! cacheline_pad { ($N:expr) => { CACHELINE_LEN / 8 - $N } }
 #[repr(C)]
 pub struct Buffer<T> {
     /// A pointer to the allocated ring buffer
-    buffer:         *mut T,
+    buffer:         NonNull<T>,
 
     /// The bounded size as specified by the user.  If the queue reaches capacity, it will block
     /// until values are poppped off.
@@ -77,9 +67,6 @@ pub struct Producer<T> {
 
 unsafe impl<T: Send> Send for Consumer<T> { }
 unsafe impl<T: Send> Send for Producer<T> { }
-
-impl<T> !Sync for Consumer<T> {}
-impl<T> !Sync for Producer<T> {}
 
 impl<T> Buffer<T> {
 
@@ -225,7 +212,7 @@ impl<T> Buffer<T> {
     /// buffer wrapping is handled inside the method.
     #[inline]
     unsafe fn load(&self, pos: usize) -> &T {
-        transmute(self.buffer.offset((pos & (self.allocated_size - 1)) as isize))
+        transmute(self.buffer.as_ptr().offset((pos & (self.allocated_size - 1)) as isize))
     }
 
     /// Store a value in the buffer
@@ -236,7 +223,7 @@ impl<T> Buffer<T> {
     /// - Initialized a valid block of memory
     #[inline]
     unsafe fn store(&self, pos: usize, v: T) {
-        let end = self.buffer.offset((pos & (self.allocated_size - 1)) as isize);
+        let end = self.buffer.as_ptr().offset((pos & (self.allocated_size - 1)) as isize);
         ptr::write(&mut *end, v);
     }
 }
@@ -259,7 +246,7 @@ impl<T> Drop for Buffer<T> {
 
         unsafe {
             let layout = Layout::from_size_align(self.allocated_size * mem::size_of::<T>(), mem::align_of::<T>()).unwrap();
-            Heap.dealloc(self.buffer as *mut u8, layout);
+            Global.dealloc(self.buffer.as_opaque(), layout);
         }
     }
 }
@@ -339,15 +326,15 @@ pub fn make<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
 }
 
 /// Allocates a memory buffer on the heap and returns a pointer to it
-unsafe fn allocate_buffer<T>(capacity: usize) -> *mut T {
+unsafe fn allocate_buffer<T>(capacity: usize) -> NonNull<T> {
     let adjusted_size = capacity.next_power_of_two();
     let size = adjusted_size.checked_mul(mem::size_of::<T>())
                 .expect("capacity overflow");
 
     let layout = Layout::from_size_align(size, mem::align_of::<T>()).unwrap();
-    match Heap.alloc(layout) {
-        Ok(ptr) => ptr as *mut T,
-        Err(e) => Heap.oom(e),
+    match Global.alloc(layout) {
+        Ok(ptr) => ptr.cast(),
+        Err(_) => alloc::oom(),
     }
 }
 
@@ -697,151 +684,16 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "benchmark")]
-    fn bench_chan(b: &mut Bencher) {
-        let (tx, rx) = sync_channel::<u8>(500);
-        b.iter(|| {
-            tx.send(1);
-            rx.recv().unwrap()
-        });
-    }
+    extern crate time;
+    use self::time::PreciseTime;
+    use std::sync::mpsc::sync_channel;
 
-    #[cfg(feature = "benchmark")]
-    fn bench_chan_threaded(b: &mut Bencher) {
-        let (tx, rx) = sync_channel::<u8>(500);
-        let flag = AtomicBool::new(false);
-        let arc_flag = Arc::new(flag);
-
-        let flag_clone = arc_flag.clone();
-        thread::spawn(move|| {
-            while flag_clone.load(Ordering::Acquire) == false {
-                // Try to do as much work as possible without checking the atomic
-                for _ in 0..400 {
-                    rx.recv().unwrap();
-                }
-            }
-        });
-
-        b.iter(|| {
-            tx.send(1)
-        });
-
-        let flag_clone = arc_flag.clone();
-        flag_clone.store(true, Ordering::Release);
-
-        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
-        for _ in 0..400 {
-            tx.send(1);
-        }
-    }
-
-    #[cfg(feature = "benchmark")]
-    fn bench_chan_threaded2(b: &mut Bencher) {
-        let (tx, rx) = sync_channel::<u8>(500);
-        let flag = AtomicBool::new(false);
-        let arc_flag = Arc::new(flag);
-
-        let flag_clone = arc_flag.clone();
-        thread::spawn(move|| {
-            while flag_clone.load(Ordering::Acquire) == false {
-                // Try to do as much work as possible without checking the atomic
-                for _ in 0..400 {
-                    tx.send(1);
-                }
-            }
-        });
-
-        b.iter(|| {
-            rx.recv().unwrap()
-        });
-
-        let flag_clone = arc_flag.clone();
-        flag_clone.store(true, Ordering::Release);
-
-        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
-        for _ in 0..400 {
-            rx.try_recv();
-        }
-    }
-
-    #[cfg(feature = "benchmark")]
-    fn bench_spsc(b: &mut Bencher) {
-        let (p, c) = super::make(500);
-
-        b.iter(|| {
-            p.push(1);
-            c.pop()
-        });
-    }
-
-    #[cfg(feature = "benchmark")]
-    fn bench_spsc_threaded(b: &mut Bencher) {
-        let (p, c) = super::make(500);
-
-        let flag = AtomicBool::new(false);
-        let arc_flag = Arc::new(flag);
-
-        let flag_clone = arc_flag.clone();
-        thread::spawn(move|| {
-            while flag_clone.load(Ordering::Acquire) == false {
-
-                // Try to do as much work as possible without checking the atomic
-                for _ in 0..400 {
-                    c.pop();
-                }
-            }
-        });
-
-        b.iter(|| {
-            p.push(1)
-        });
-
-        let flag_clone = arc_flag.clone();
-        flag_clone.store(true, Ordering::Release);
-
-        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
-        for _ in 0..400 {
-            p.try_push(1);
-        }
-    }
-
-    #[cfg(feature = "benchmark")]
-    fn bench_spsc_threaded2(b: &mut Bencher) {
-        let (p, c) = super::make(500);
-
-        let flag = AtomicBool::new(false);
-        let arc_flag = Arc::new(flag);
-
-        let flag_clone = arc_flag.clone();
-        thread::spawn(move|| {
-            while flag_clone.load(Ordering::Acquire) == false {
-
-                // Try to do as much work as possible without checking the atomic
-                for _ in 0..400 {
-                    p.push(1);
-                }
-            }
-        });
-
-        b.iter(|| {
-            c.pop()
-        });
-
-        let flag_clone = arc_flag.clone();
-        flag_clone.store(true, Ordering::Release);
-
-        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
-        for _ in 0..400 {
-            c.try_pop();
-        }
-    }
-
-    #[cfg(feature = "benchmark")]
     #[test]
+    #[ignore]
     fn bench_spsc_throughput() {
         let iterations: i64 = 2i64.pow(14);
 
-        let (p, c) = super::make(iterations as usize);
+        let (p, c) = make(iterations as usize);
 
         let start = PreciseTime::now();
         for i in 0..iterations as usize {
@@ -850,17 +702,18 @@ mod tests {
         let t = c.pop();
         assert!(t == 0);
         let end = PreciseTime::now();
-        let throughput = (iterations as f64 / (start.to(end)).num_nanoseconds().unwrap() as f64) * 1000000000f64;
-        println!("Spsc Throughput: {}/s -- (iterations: {} in {} ns)",
+        let throughput =
+            (iterations as f64 / (start.to(end)).num_nanoseconds().unwrap() as f64) * 1000000000f64;
+        println!(
+            "Spsc Throughput: {}/s -- (iterations: {} in {} ns)",
             throughput,
             iterations,
-            (start.to(end)).num_nanoseconds().unwrap());
-
-
+            (start.to(end)).num_nanoseconds().unwrap()
+        );
     }
 
-    #[cfg(feature = "benchmark")]
     #[test]
+    #[ignore]
     fn bench_chan_throughput() {
         let iterations: i64 = 2i64.pow(14);
 
@@ -868,75 +721,19 @@ mod tests {
 
         let start = PreciseTime::now();
         for i in 0..iterations as usize {
-            tx.send(i);
+            tx.send(i).unwrap();
         }
         let t = rx.recv().unwrap();
         assert!(t == 0);
         let end = PreciseTime::now();
-        let throughput = (iterations as f64 / (start.to(end)).num_nanoseconds().unwrap() as f64) * 1000000000f64;
-        println!("Chan Throughput: {}/s -- (iterations: {} in {} ns)",
+        let throughput =
+            (iterations as f64 / (start.to(end)).num_nanoseconds().unwrap() as f64) * 1000000000f64;
+        println!(
+            "Chan Throughput: {}/s -- (iterations: {} in {} ns)",
             throughput,
             iterations,
-            (start.to(end)).num_nanoseconds().unwrap());
-
-
+            (start.to(end)).num_nanoseconds().unwrap()
+        );
     }
 
-/*
-    #[cfg(feature = "benchmark")] use std::sync::mpsc::sync_channel;
-    #[cfg(feature = "benchmark")] use criterion::{Bencher, Criterion};
-    #[cfg(feature = "benchmark")] use std::sync::atomic::{AtomicBool, Ordering};
-    #[cfg(feature = "benchmark")] use std::sync::Arc;
-    #[cfg(feature = "benchmark")] use time::{Duration, PreciseTime};
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_single_thread_chan() {
-        Criterion::default()
-            .bench_function("bench_single_chan", bench_chan);
-    }
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_single_thread_spsc() {
-        Criterion::default()
-            .bench_function("bench_single_spsc", bench_spsc);
-    }
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_threaded_chan() {
-        Criterion::default()
-            .bench_function("bench_threaded_chan", bench_chan_threaded);
-    }
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_threaded_spsc() {
-        Criterion::default()
-            .bench_function("bench_threaded_spsc", bench_spsc_threaded);
-    }
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_threaded_reverse_chan() {
-        Criterion::default()
-            //.warm_up_time(Duration::seconds(10))
-            //.measurement_time(Duration::seconds(100))
-            //.sample_size(100)
-            //.nresamples(500000)
-            .bench_function("bench_reverse_chan", bench_chan_threaded2);
-    }
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_threaded_reverse_spsc() {
-        Criterion::default()
-            //.warm_up_time(Duration::seconds(10))
-            //.measurement_time(Duration::seconds(100))
-            //.sample_size(100)
-            //.nresamples(500000)
-            .bench_function("bench_reverse_spsc", bench_spsc_threaded2);
-    }
-*/
 }
