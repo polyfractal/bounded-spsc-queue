@@ -2,20 +2,22 @@
 
 extern crate core;
 
-use std::alloc;
 use core::alloc::{Alloc, Layout};
+use core::{mem, ptr};
+use std::alloc;
 use std::alloc::Global;
+use std::cell::Cell;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::usize;
 use std::sync::Arc;
-use std::cell::Cell;
-use core::{mem, ptr};
+use std::usize;
 
 const CACHELINE_LEN: usize = 64;
 
 macro_rules! cacheline_pad {
-   ($N:expr) => { CACHELINE_LEN / std::mem::size_of::<usize>() - $N }
+    ($N:expr) => {
+        CACHELINE_LEN / std::mem::size_of::<usize>() - $N
+    };
 }
 
 /// The internal memory buffer used by the queue.
@@ -26,33 +28,33 @@ macro_rules! cacheline_pad {
 #[repr(C)]
 pub struct Buffer<T> {
     /// A pointer to the allocated ring buffer
-    buffer:         NonNull<T>,
+    buffer: NonNull<T>,
 
     /// The bounded size as specified by the user.  If the queue reaches capacity, it will block
     /// until values are poppped off.
-    capacity:       usize,
+    capacity: usize,
 
     /// The allocated size of the ring buffer, in terms of number of values (not physical memory).
     /// This will be the next power of two larger than `capacity`
     allocated_size: usize,
-    _padding1:      [usize; cacheline_pad!(3)],
+    _padding1: [usize; cacheline_pad!(3)],
 
     /// Consumer cacheline:
 
     /// Index position of the current head
-    head:           AtomicUsize,
-    shadow_tail:    Cell<usize>,
-    _padding2:      [usize; cacheline_pad!(2)],
+    head: AtomicUsize,
+    shadow_tail: Cell<usize>,
+    _padding2: [usize; cacheline_pad!(2)],
 
     /// Producer cacheline:
 
     /// Index position of current tail
-    tail:           AtomicUsize,
-    shadow_head:    Cell<usize>,
-    _padding3:      [usize; cacheline_pad!(2)],
+    tail: AtomicUsize,
+    shadow_head: Cell<usize>,
+    _padding3: [usize; cacheline_pad!(2)],
 }
 
-unsafe impl<T: Sync> Sync for Buffer<T> { }
+unsafe impl<T: Sync> Sync for Buffer<T> {}
 
 /// A handle to the queue which allows consuming values from the buffer
 pub struct Consumer<T> {
@@ -64,11 +66,10 @@ pub struct Producer<T> {
     buffer: Arc<Buffer<T>>,
 }
 
-unsafe impl<T: Send> Send for Consumer<T> { }
-unsafe impl<T: Send> Send for Producer<T> { }
+unsafe impl<T: Send> Send for Consumer<T> {}
+unsafe impl<T: Send> Send for Producer<T> {}
 
 impl<T> Buffer<T> {
-
     /// Attempt to pop a value off the buffer.
     ///
     /// If the buffer is empty, this method will not block.  Instead, it will return `None`
@@ -96,7 +97,8 @@ impl<T> Buffer<T> {
         }
 
         let v = unsafe { ptr::read(self.load(current_head)) };
-        self.head.store(current_head.wrapping_add(1), Ordering::Release);
+        self.head
+            .store(current_head.wrapping_add(1), Ordering::Release);
         Some(v)
     }
 
@@ -112,14 +114,16 @@ impl<T> Buffer<T> {
     pub fn skip_n(&self, n: usize) -> usize {
         let current_head = self.head.load(Ordering::Relaxed);
 
-
         self.shadow_tail.set(self.tail.load(Ordering::Acquire));
         if current_head == self.shadow_tail.get() {
             return 0;
         }
         let mut diff = self.shadow_tail.get().wrapping_sub(current_head);
-        if diff > n { diff = n }
-        self.head.store(current_head.wrapping_add(diff), Ordering::Release);
+        if diff > n {
+            diff = n
+        }
+        self.head
+            .store(current_head.wrapping_add(diff), Ordering::Release);
         diff
     }
 
@@ -138,9 +142,9 @@ impl<T> Buffer<T> {
     /// ```
     pub fn pop(&self) -> T {
         loop {
-            match self.try_pop()  {
-                None => {},
-                Some(v) => return v
+            match self.try_pop() {
+                None => {}
+                Some(v) => return v,
             }
         }
     }
@@ -171,8 +175,11 @@ impl<T> Buffer<T> {
             }
         }
 
-        unsafe { self.store(current_tail, v); }
-        self.tail.store(current_tail.wrapping_add(1), Ordering::Release);
+        unsafe {
+            self.store(current_tail, v);
+        }
+        self.tail
+            .store(current_tail.wrapping_add(1), Ordering::Release);
         None
     }
 
@@ -194,7 +201,7 @@ impl<T> Buffer<T> {
         loop {
             match self.try_push(t) {
                 Some(rv) => t = rv,
-                None => return
+                None => return,
             }
         }
     }
@@ -211,7 +218,9 @@ impl<T> Buffer<T> {
     /// buffer wrapping is handled inside the method.
     #[inline]
     unsafe fn load(&self, pos: usize) -> &T {
-        &*self.buffer.as_ptr().offset((pos & (self.allocated_size - 1)) as isize)
+        &*self.buffer
+            .as_ptr()
+            .offset((pos & (self.allocated_size - 1)) as isize)
     }
 
     /// Store a value in the buffer
@@ -222,7 +231,9 @@ impl<T> Buffer<T> {
     /// - Initialized a valid block of memory
     #[inline]
     unsafe fn store(&self, pos: usize, v: T) {
-        let end = self.buffer.as_ptr().offset((pos & (self.allocated_size - 1)) as isize);
+        let end = self.buffer
+            .as_ptr()
+            .offset((pos & (self.allocated_size - 1)) as isize);
         ptr::write(&mut *end, v);
     }
 }
@@ -230,7 +241,6 @@ impl<T> Buffer<T> {
 /// Handles deallocation of heap memory when the buffer is dropped
 impl<T> Drop for Buffer<T> {
     fn drop(&mut self) {
-
         // Pop the rest of the values off the queue.  By moving them into this scope,
         // we implicitly call their destructor
 
@@ -239,7 +249,10 @@ impl<T> Drop for Buffer<T> {
         while let Some(_) = self.try_pop() {}
 
         unsafe {
-            let layout = Layout::from_size_align(self.allocated_size * mem::size_of::<T>(), mem::align_of::<T>()).unwrap();
+            let layout = Layout::from_size_align(
+                self.allocated_size * mem::size_of::<T>(),
+                mem::align_of::<T>(),
+            ).unwrap();
             Global.dealloc(self.buffer.as_opaque(), layout);
         }
     }
@@ -298,32 +311,39 @@ impl<T> Drop for Buffer<T> {
 /// `capacity.next_power_of_two() * size_of::<T>() > available memory` ), this function will abort
 /// with an OOM panic.
 pub fn make<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
-
     let ptr = unsafe { allocate_buffer(capacity) };
 
-    let arc = Arc::new(Buffer{
+    let arc = Arc::new(Buffer {
         buffer: ptr,
         capacity,
         allocated_size: capacity.next_power_of_two(),
-        _padding1:      [0; cacheline_pad!(3)],
+        _padding1: [0; cacheline_pad!(3)],
 
-        head:           AtomicUsize::new(0),
-        shadow_tail:    Cell::new(0),
-        _padding2:      [0; cacheline_pad!(2)],
+        head: AtomicUsize::new(0),
+        shadow_tail: Cell::new(0),
+        _padding2: [0; cacheline_pad!(2)],
 
-        tail:           AtomicUsize::new(0),
-        shadow_head:    Cell::new(0),
-        _padding3:      [0; cacheline_pad!(2)],
+        tail: AtomicUsize::new(0),
+        shadow_head: Cell::new(0),
+        _padding3: [0; cacheline_pad!(2)],
     });
 
-    (Producer { buffer: arc.clone() }, Consumer { buffer: arc.clone() })
+    (
+        Producer {
+            buffer: arc.clone(),
+        },
+        Consumer {
+            buffer: arc.clone(),
+        },
+    )
 }
 
 /// Allocates a memory buffer on the heap and returns a pointer to it
 unsafe fn allocate_buffer<T>(capacity: usize) -> NonNull<T> {
     let adjusted_size = capacity.next_power_of_two();
-    let size = adjusted_size.checked_mul(mem::size_of::<T>())
-                .expect("capacity overflow");
+    let size = adjusted_size
+        .checked_mul(mem::size_of::<T>())
+        .expect("capacity overflow");
 
     let layout = Layout::from_size_align(size, mem::align_of::<T>()).unwrap();
     match Global.alloc(layout) {
@@ -333,7 +353,6 @@ unsafe fn allocate_buffer<T>(capacity: usize) -> NonNull<T> {
 }
 
 impl<T> Producer<T> {
-
     /// Push a value onto the buffer.
     ///
     /// If the buffer is non-full, the operation will execute immediately.  If the buffer is full,
@@ -427,11 +446,9 @@ impl<T> Producer<T> {
     pub fn free_space(&self) -> usize {
         self.capacity() - self.size()
     }
-
 }
 
 impl<T> Consumer<T> {
-
     /// Pop a value off the queue.
     ///
     /// If the buffer contains values, this method will execute immediately and return a value.
@@ -535,10 +552,7 @@ impl<T> Consumer<T> {
     pub fn size(&self) -> usize {
         (*self.buffer).tail.load(Ordering::Acquire) - (*self.buffer).head.load(Ordering::Acquire)
     }
-
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -598,7 +612,7 @@ mod tests {
             let t = c.pop();
             assert!(c.capacity() == 10);
             assert!(c.size() == 4 - i - 1);
-            assert!(t == i+5);
+            assert!(t == i + 5);
         }
         assert!(c.size() == 0);
         assert!(c.skip_n(5) == 0);
@@ -631,8 +645,8 @@ mod tests {
         match p.try_push(10) {
             Some(v) => {
                 assert!(v == 10);
-            },
-            None => assert!(false, "Queue should not have accepted another write!")
+            }
+            None => assert!(false, "Queue should not have accepted another write!"),
         }
     }
 
@@ -641,9 +655,7 @@ mod tests {
         let (p, c) = super::make(10);
 
         match c.try_pop() {
-            Some(_) => {
-                assert!(false, "Queue was empty but a value was read!")
-            },
+            Some(_) => assert!(false, "Queue was empty but a value was read!"),
             None => {}
         }
 
@@ -651,13 +663,11 @@ mod tests {
 
         match c.try_pop() {
             Some(v) => assert!(v == 123),
-            None => assert!(false, "Queue was not empty but poll() returned nothing!")
+            None => assert!(false, "Queue was not empty but poll() returned nothing!"),
         }
 
         match c.try_pop() {
-            Some(_) => {
-                assert!(false, "Queue was empty but a value was read!")
-            },
+            Some(_) => assert!(false, "Queue was empty but a value was read!"),
             None => {}
         }
     }
@@ -666,7 +676,7 @@ mod tests {
     fn test_threaded() {
         let (p, c) = super::make(500);
 
-        thread::spawn(move|| {
+        thread::spawn(move || {
             for i in 0..100000 {
                 p.push(i);
             }
