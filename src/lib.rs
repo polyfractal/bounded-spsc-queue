@@ -11,7 +11,6 @@ use std::usize;
 use std::sync::Arc;
 use std::cell::Cell;
 use core::{mem, ptr};
-use core::mem::transmute;
 
 const CACHELINE_LEN: usize = 64;
 
@@ -212,7 +211,7 @@ impl<T> Buffer<T> {
     /// buffer wrapping is handled inside the method.
     #[inline]
     unsafe fn load(&self, pos: usize) -> &T {
-        transmute(self.buffer.as_ptr().offset((pos & (self.allocated_size - 1)) as isize))
+        &*self.buffer.as_ptr().offset((pos & (self.allocated_size - 1)) as isize)
     }
 
     /// Store a value in the buffer
@@ -237,12 +236,7 @@ impl<T> Drop for Buffer<T> {
 
         // TODO this could be optimized to avoid the atomic operations / book-keeping...but
         // since this is the destructor, there shouldn't be any contention... so meh?
-        loop {
-            match self.try_pop() {
-                Some(_) => {},  // Got a value, keep poppin!
-                None => break   // All done, deallocate mem now
-            }
-        }
+        while let Some(_) = self.try_pop() {}
 
         unsafe {
             let layout = Layout::from_size_align(self.allocated_size * mem::size_of::<T>(), mem::align_of::<T>()).unwrap();
@@ -309,7 +303,7 @@ pub fn make<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
 
     let arc = Arc::new(Buffer{
         buffer: ptr,
-        capacity: capacity,
+        capacity,
         allocated_size: capacity.next_power_of_two(),
         _padding1:      [0; cacheline_pad!(3)],
 
