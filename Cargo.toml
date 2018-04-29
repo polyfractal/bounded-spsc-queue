@@ -1,6 +1,6 @@
 [package]
 name = "bounded-spsc-queue"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Zachary Tong <zacharyjtong@gmail.com>"]
 license = "Apache-2.0"
 description = "A bounded SPSC queue"
