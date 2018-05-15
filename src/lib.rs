@@ -1,33 +1,24 @@
-#![feature(allocator_api, alloc, box_syntax, optin_builtin_traits)]
+#![feature(allocator_api)]
 
 extern crate core;
-extern crate alloc;
 
-#[cfg(feature = "benchmark")] extern crate criterion;
-#[cfg(feature = "benchmark")] extern crate time;
-
-
-use alloc::allocator::{Alloc, Layout};
-use alloc::heap::Heap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::usize;
-use std::sync::Arc;
-use std::cell::Cell;
+use core::alloc::{Alloc, Layout};
 use core::{mem, ptr};
-use core::mem::transmute;
+use std::alloc;
+use std::alloc::Global;
+use std::cell::Cell;
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::usize;
 
 const CACHELINE_LEN: usize = 64;
 
-#[cfg(target_pointer_width = "32")]
-macro_rules! cacheline_pad { ($N:expr) => { CACHELINE_LEN / 4 - $N } }
-
-#[cfg(target_pointer_width = "64")]
-macro_rules! cacheline_pad { ($N:expr) => { CACHELINE_LEN / 8 - $N } }
-
-/* doesn't work yet: */
-//macro_rules! cacheline_pad {
-//    ($N:expr) => { 64 / std::mem::size_of::<usize>() - $N }
-//}
+macro_rules! cacheline_pad {
+    ($N:expr) => {
+        CACHELINE_LEN / std::mem::size_of::<usize>() - $N
+    };
+}
 
 /// The internal memory buffer used by the queue.
 ///
@@ -37,33 +28,33 @@ macro_rules! cacheline_pad { ($N:expr) => { CACHELINE_LEN / 8 - $N } }
 #[repr(C)]
 pub struct Buffer<T> {
     /// A pointer to the allocated ring buffer
-    buffer:         *mut T,
+    buffer: NonNull<T>,
 
     /// The bounded size as specified by the user.  If the queue reaches capacity, it will block
     /// until values are poppped off.
-    capacity:       usize,
+    capacity: usize,
 
     /// The allocated size of the ring buffer, in terms of number of values (not physical memory).
     /// This will be the next power of two larger than `capacity`
     allocated_size: usize,
-    _padding1:      [usize; cacheline_pad!(3)],
+    _padding1: [usize; cacheline_pad!(3)],
 
     /// Consumer cacheline:
 
     /// Index position of the current head
-    head:           AtomicUsize,
-    shadow_tail:    Cell<usize>,
-    _padding2:      [usize; cacheline_pad!(2)],
+    head: AtomicUsize,
+    shadow_tail: Cell<usize>,
+    _padding2: [usize; cacheline_pad!(2)],
 
     /// Producer cacheline:
 
     /// Index position of current tail
-    tail:           AtomicUsize,
-    shadow_head:    Cell<usize>,
-    _padding3:      [usize; cacheline_pad!(2)],
+    tail: AtomicUsize,
+    shadow_head: Cell<usize>,
+    _padding3: [usize; cacheline_pad!(2)],
 }
 
-unsafe impl<T: Sync> Sync for Buffer<T> { }
+unsafe impl<T: Sync> Sync for Buffer<T> {}
 
 /// A handle to the queue which allows consuming values from the buffer
 pub struct Consumer<T> {
@@ -75,14 +66,10 @@ pub struct Producer<T> {
     buffer: Arc<Buffer<T>>,
 }
 
-unsafe impl<T: Send> Send for Consumer<T> { }
-unsafe impl<T: Send> Send for Producer<T> { }
-
-impl<T> !Sync for Consumer<T> {}
-impl<T> !Sync for Producer<T> {}
+unsafe impl<T: Send> Send for Consumer<T> {}
+unsafe impl<T: Send> Send for Producer<T> {}
 
 impl<T> Buffer<T> {
-
     /// Attempt to pop a value off the buffer.
     ///
     /// If the buffer is empty, this method will not block.  Instead, it will return `None`
@@ -110,7 +97,8 @@ impl<T> Buffer<T> {
         }
 
         let v = unsafe { ptr::read(self.load(current_head)) };
-        self.head.store(current_head.wrapping_add(1), Ordering::Release);
+        self.head
+            .store(current_head.wrapping_add(1), Ordering::Release);
         Some(v)
     }
 
@@ -126,14 +114,16 @@ impl<T> Buffer<T> {
     pub fn skip_n(&self, n: usize) -> usize {
         let current_head = self.head.load(Ordering::Relaxed);
 
-
         self.shadow_tail.set(self.tail.load(Ordering::Acquire));
         if current_head == self.shadow_tail.get() {
             return 0;
         }
         let mut diff = self.shadow_tail.get().wrapping_sub(current_head);
-        if diff > n { diff = n }
-        self.head.store(current_head.wrapping_add(diff), Ordering::Release);
+        if diff > n {
+            diff = n
+        }
+        self.head
+            .store(current_head.wrapping_add(diff), Ordering::Release);
         diff
     }
 
@@ -152,9 +142,9 @@ impl<T> Buffer<T> {
     /// ```
     pub fn pop(&self) -> T {
         loop {
-            match self.try_pop()  {
-                None => {},
-                Some(v) => return v
+            match self.try_pop() {
+                None => {}
+                Some(v) => return v,
             }
         }
     }
@@ -185,8 +175,11 @@ impl<T> Buffer<T> {
             }
         }
 
-        unsafe { self.store(current_tail, v); }
-        self.tail.store(current_tail.wrapping_add(1), Ordering::Release);
+        unsafe {
+            self.store(current_tail, v);
+        }
+        self.tail
+            .store(current_tail.wrapping_add(1), Ordering::Release);
         None
     }
 
@@ -208,7 +201,7 @@ impl<T> Buffer<T> {
         loop {
             match self.try_push(t) {
                 Some(rv) => t = rv,
-                None => return
+                None => return,
             }
         }
     }
@@ -225,7 +218,9 @@ impl<T> Buffer<T> {
     /// buffer wrapping is handled inside the method.
     #[inline]
     unsafe fn load(&self, pos: usize) -> &T {
-        transmute(self.buffer.offset((pos & (self.allocated_size - 1)) as isize))
+        &*self.buffer
+            .as_ptr()
+            .offset((pos & (self.allocated_size - 1)) as isize)
     }
 
     /// Store a value in the buffer
@@ -236,7 +231,9 @@ impl<T> Buffer<T> {
     /// - Initialized a valid block of memory
     #[inline]
     unsafe fn store(&self, pos: usize, v: T) {
-        let end = self.buffer.offset((pos & (self.allocated_size - 1)) as isize);
+        let end = self.buffer
+            .as_ptr()
+            .offset((pos & (self.allocated_size - 1)) as isize);
         ptr::write(&mut *end, v);
     }
 }
@@ -244,22 +241,19 @@ impl<T> Buffer<T> {
 /// Handles deallocation of heap memory when the buffer is dropped
 impl<T> Drop for Buffer<T> {
     fn drop(&mut self) {
-
         // Pop the rest of the values off the queue.  By moving them into this scope,
         // we implicitly call their destructor
 
         // TODO this could be optimized to avoid the atomic operations / book-keeping...but
         // since this is the destructor, there shouldn't be any contention... so meh?
-        loop {
-            match self.try_pop() {
-                Some(_) => {},  // Got a value, keep poppin!
-                None => break   // All done, deallocate mem now
-            }
-        }
+        while let Some(_) = self.try_pop() {}
 
         unsafe {
-            let layout = Layout::from_size_align(self.allocated_size * mem::size_of::<T>(), mem::align_of::<T>()).unwrap();
-            Heap.dealloc(self.buffer as *mut u8, layout);
+            let layout = Layout::from_size_align(
+                self.allocated_size * mem::size_of::<T>(),
+                mem::align_of::<T>(),
+            ).unwrap();
+            Global.dealloc(self.buffer.as_opaque(), layout);
         }
     }
 }
@@ -317,42 +311,48 @@ impl<T> Drop for Buffer<T> {
 /// `capacity.next_power_of_two() * size_of::<T>() > available memory` ), this function will abort
 /// with an OOM panic.
 pub fn make<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
-
     let ptr = unsafe { allocate_buffer(capacity) };
 
-    let arc = Arc::new(Buffer{
+    let arc = Arc::new(Buffer {
         buffer: ptr,
-        capacity: capacity,
+        capacity,
         allocated_size: capacity.next_power_of_two(),
-        _padding1:      [0; cacheline_pad!(3)],
+        _padding1: [0; cacheline_pad!(3)],
 
-        head:           AtomicUsize::new(0),
-        shadow_tail:    Cell::new(0),
-        _padding2:      [0; cacheline_pad!(2)],
+        head: AtomicUsize::new(0),
+        shadow_tail: Cell::new(0),
+        _padding2: [0; cacheline_pad!(2)],
 
-        tail:           AtomicUsize::new(0),
-        shadow_head:    Cell::new(0),
-        _padding3:      [0; cacheline_pad!(2)],
+        tail: AtomicUsize::new(0),
+        shadow_head: Cell::new(0),
+        _padding3: [0; cacheline_pad!(2)],
     });
 
-    (Producer { buffer: arc.clone() }, Consumer { buffer: arc.clone() })
+    (
+        Producer {
+            buffer: arc.clone(),
+        },
+        Consumer {
+            buffer: arc.clone(),
+        },
+    )
 }
 
 /// Allocates a memory buffer on the heap and returns a pointer to it
-unsafe fn allocate_buffer<T>(capacity: usize) -> *mut T {
+unsafe fn allocate_buffer<T>(capacity: usize) -> NonNull<T> {
     let adjusted_size = capacity.next_power_of_two();
-    let size = adjusted_size.checked_mul(mem::size_of::<T>())
-                .expect("capacity overflow");
+    let size = adjusted_size
+        .checked_mul(mem::size_of::<T>())
+        .expect("capacity overflow");
 
     let layout = Layout::from_size_align(size, mem::align_of::<T>()).unwrap();
-    match Heap.alloc(layout) {
-        Ok(ptr) => ptr as *mut T,
-        Err(e) => Heap.oom(e),
+    match Global.alloc(layout) {
+        Ok(ptr) => ptr.cast(),
+        Err(_) => alloc::oom(),
     }
 }
 
 impl<T> Producer<T> {
-
     /// Push a value onto the buffer.
     ///
     /// If the buffer is non-full, the operation will execute immediately.  If the buffer is full,
@@ -446,11 +446,9 @@ impl<T> Producer<T> {
     pub fn free_space(&self) -> usize {
         self.capacity() - self.size()
     }
-
 }
 
 impl<T> Consumer<T> {
-
     /// Pop a value off the queue.
     ///
     /// If the buffer contains values, this method will execute immediately and return a value.
@@ -554,10 +552,7 @@ impl<T> Consumer<T> {
     pub fn size(&self) -> usize {
         (*self.buffer).tail.load(Ordering::Acquire) - (*self.buffer).head.load(Ordering::Acquire)
     }
-
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -617,7 +612,7 @@ mod tests {
             let t = c.pop();
             assert!(c.capacity() == 10);
             assert!(c.size() == 4 - i - 1);
-            assert!(t == i+5);
+            assert!(t == i + 5);
         }
         assert!(c.size() == 0);
         assert!(c.skip_n(5) == 0);
@@ -650,8 +645,8 @@ mod tests {
         match p.try_push(10) {
             Some(v) => {
                 assert!(v == 10);
-            },
-            None => assert!(false, "Queue should not have accepted another write!")
+            }
+            None => assert!(false, "Queue should not have accepted another write!"),
         }
     }
 
@@ -660,9 +655,7 @@ mod tests {
         let (p, c) = super::make(10);
 
         match c.try_pop() {
-            Some(_) => {
-                assert!(false, "Queue was empty but a value was read!")
-            },
+            Some(_) => assert!(false, "Queue was empty but a value was read!"),
             None => {}
         }
 
@@ -670,13 +663,11 @@ mod tests {
 
         match c.try_pop() {
             Some(v) => assert!(v == 123),
-            None => assert!(false, "Queue was not empty but poll() returned nothing!")
+            None => assert!(false, "Queue was not empty but poll() returned nothing!"),
         }
 
         match c.try_pop() {
-            Some(_) => {
-                assert!(false, "Queue was empty but a value was read!")
-            },
+            Some(_) => assert!(false, "Queue was empty but a value was read!"),
             None => {}
         }
     }
@@ -685,7 +676,7 @@ mod tests {
     fn test_threaded() {
         let (p, c) = super::make(500);
 
-        thread::spawn(move|| {
+        thread::spawn(move || {
             for i in 0..100000 {
                 p.push(i);
             }
@@ -697,151 +688,16 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "benchmark")]
-    fn bench_chan(b: &mut Bencher) {
-        let (tx, rx) = sync_channel::<u8>(500);
-        b.iter(|| {
-            tx.send(1);
-            rx.recv().unwrap()
-        });
-    }
+    extern crate time;
+    use self::time::PreciseTime;
+    use std::sync::mpsc::sync_channel;
 
-    #[cfg(feature = "benchmark")]
-    fn bench_chan_threaded(b: &mut Bencher) {
-        let (tx, rx) = sync_channel::<u8>(500);
-        let flag = AtomicBool::new(false);
-        let arc_flag = Arc::new(flag);
-
-        let flag_clone = arc_flag.clone();
-        thread::spawn(move|| {
-            while flag_clone.load(Ordering::Acquire) == false {
-                // Try to do as much work as possible without checking the atomic
-                for _ in 0..400 {
-                    rx.recv().unwrap();
-                }
-            }
-        });
-
-        b.iter(|| {
-            tx.send(1)
-        });
-
-        let flag_clone = arc_flag.clone();
-        flag_clone.store(true, Ordering::Release);
-
-        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
-        for _ in 0..400 {
-            tx.send(1);
-        }
-    }
-
-    #[cfg(feature = "benchmark")]
-    fn bench_chan_threaded2(b: &mut Bencher) {
-        let (tx, rx) = sync_channel::<u8>(500);
-        let flag = AtomicBool::new(false);
-        let arc_flag = Arc::new(flag);
-
-        let flag_clone = arc_flag.clone();
-        thread::spawn(move|| {
-            while flag_clone.load(Ordering::Acquire) == false {
-                // Try to do as much work as possible without checking the atomic
-                for _ in 0..400 {
-                    tx.send(1);
-                }
-            }
-        });
-
-        b.iter(|| {
-            rx.recv().unwrap()
-        });
-
-        let flag_clone = arc_flag.clone();
-        flag_clone.store(true, Ordering::Release);
-
-        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
-        for _ in 0..400 {
-            rx.try_recv();
-        }
-    }
-
-    #[cfg(feature = "benchmark")]
-    fn bench_spsc(b: &mut Bencher) {
-        let (p, c) = super::make(500);
-
-        b.iter(|| {
-            p.push(1);
-            c.pop()
-        });
-    }
-
-    #[cfg(feature = "benchmark")]
-    fn bench_spsc_threaded(b: &mut Bencher) {
-        let (p, c) = super::make(500);
-
-        let flag = AtomicBool::new(false);
-        let arc_flag = Arc::new(flag);
-
-        let flag_clone = arc_flag.clone();
-        thread::spawn(move|| {
-            while flag_clone.load(Ordering::Acquire) == false {
-
-                // Try to do as much work as possible without checking the atomic
-                for _ in 0..400 {
-                    c.pop();
-                }
-            }
-        });
-
-        b.iter(|| {
-            p.push(1)
-        });
-
-        let flag_clone = arc_flag.clone();
-        flag_clone.store(true, Ordering::Release);
-
-        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
-        for _ in 0..400 {
-            p.try_push(1);
-        }
-    }
-
-    #[cfg(feature = "benchmark")]
-    fn bench_spsc_threaded2(b: &mut Bencher) {
-        let (p, c) = super::make(500);
-
-        let flag = AtomicBool::new(false);
-        let arc_flag = Arc::new(flag);
-
-        let flag_clone = arc_flag.clone();
-        thread::spawn(move|| {
-            while flag_clone.load(Ordering::Acquire) == false {
-
-                // Try to do as much work as possible without checking the atomic
-                for _ in 0..400 {
-                    p.push(1);
-                }
-            }
-        });
-
-        b.iter(|| {
-            c.pop()
-        });
-
-        let flag_clone = arc_flag.clone();
-        flag_clone.store(true, Ordering::Release);
-
-        // We have to loop a minimum of 400 times to guarantee the other thread shuts down
-        for _ in 0..400 {
-            c.try_pop();
-        }
-    }
-
-    #[cfg(feature = "benchmark")]
     #[test]
+    #[ignore]
     fn bench_spsc_throughput() {
         let iterations: i64 = 2i64.pow(14);
 
-        let (p, c) = super::make(iterations as usize);
+        let (p, c) = make(iterations as usize);
 
         let start = PreciseTime::now();
         for i in 0..iterations as usize {
@@ -850,17 +706,18 @@ mod tests {
         let t = c.pop();
         assert!(t == 0);
         let end = PreciseTime::now();
-        let throughput = (iterations as f64 / (start.to(end)).num_nanoseconds().unwrap() as f64) * 1000000000f64;
-        println!("Spsc Throughput: {}/s -- (iterations: {} in {} ns)",
+        let throughput =
+            (iterations as f64 / (start.to(end)).num_nanoseconds().unwrap() as f64) * 1000000000f64;
+        println!(
+            "Spsc Throughput: {}/s -- (iterations: {} in {} ns)",
             throughput,
             iterations,
-            (start.to(end)).num_nanoseconds().unwrap());
-
-
+            (start.to(end)).num_nanoseconds().unwrap()
+        );
     }
 
-    #[cfg(feature = "benchmark")]
     #[test]
+    #[ignore]
     fn bench_chan_throughput() {
         let iterations: i64 = 2i64.pow(14);
 
@@ -868,75 +725,19 @@ mod tests {
 
         let start = PreciseTime::now();
         for i in 0..iterations as usize {
-            tx.send(i);
+            tx.send(i).unwrap();
         }
         let t = rx.recv().unwrap();
         assert!(t == 0);
         let end = PreciseTime::now();
-        let throughput = (iterations as f64 / (start.to(end)).num_nanoseconds().unwrap() as f64) * 1000000000f64;
-        println!("Chan Throughput: {}/s -- (iterations: {} in {} ns)",
+        let throughput =
+            (iterations as f64 / (start.to(end)).num_nanoseconds().unwrap() as f64) * 1000000000f64;
+        println!(
+            "Chan Throughput: {}/s -- (iterations: {} in {} ns)",
             throughput,
             iterations,
-            (start.to(end)).num_nanoseconds().unwrap());
-
-
+            (start.to(end)).num_nanoseconds().unwrap()
+        );
     }
 
-/*
-    #[cfg(feature = "benchmark")] use std::sync::mpsc::sync_channel;
-    #[cfg(feature = "benchmark")] use criterion::{Bencher, Criterion};
-    #[cfg(feature = "benchmark")] use std::sync::atomic::{AtomicBool, Ordering};
-    #[cfg(feature = "benchmark")] use std::sync::Arc;
-    #[cfg(feature = "benchmark")] use time::{Duration, PreciseTime};
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_single_thread_chan() {
-        Criterion::default()
-            .bench_function("bench_single_chan", bench_chan);
-    }
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_single_thread_spsc() {
-        Criterion::default()
-            .bench_function("bench_single_spsc", bench_spsc);
-    }
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_threaded_chan() {
-        Criterion::default()
-            .bench_function("bench_threaded_chan", bench_chan_threaded);
-    }
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_threaded_spsc() {
-        Criterion::default()
-            .bench_function("bench_threaded_spsc", bench_spsc_threaded);
-    }
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_threaded_reverse_chan() {
-        Criterion::default()
-            //.warm_up_time(Duration::seconds(10))
-            //.measurement_time(Duration::seconds(100))
-            //.sample_size(100)
-            //.nresamples(500000)
-            .bench_function("bench_reverse_chan", bench_chan_threaded2);
-    }
-
-    #[cfg(feature = "benchmark")]
-    #[test]
-    fn bench_threaded_reverse_spsc() {
-        Criterion::default()
-            //.warm_up_time(Duration::seconds(10))
-            //.measurement_time(Duration::seconds(100))
-            //.sample_size(100)
-            //.nresamples(500000)
-            .bench_function("bench_reverse_spsc", bench_spsc_threaded2);
-    }
-*/
 }

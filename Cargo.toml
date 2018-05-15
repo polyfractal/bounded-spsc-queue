@@ -1,6 +1,6 @@
 [package]
 name = "bounded-spsc-queue"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Zachary Tong <zacharyjtong@gmail.com>"]
 license = "Apache-2.0"
 description = "A bounded SPSC queue"
@@ -15,19 +15,12 @@ readme = "README.md"
 
 [lib]
 name = "bounded_spsc_queue"
-test = true
 doctest = false
 
-[features]
-# no features by default
-default = []
-nightly = []
-#benchmark = ["criterion", "time"]
+[[bench]]
+name = "benchmark"
+harness = false
 
-#[dependencies.time]
-#version = "0.1.34"
-#optional = true
-
-#[dependencies.criterion]
-#git = "https://github.com/japaric/criterion.rs.git"
-#optional = true
+[dev-dependencies]
+criterion = "0.2.3"
+time = "0.1.39"
