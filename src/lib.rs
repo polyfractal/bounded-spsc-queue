@@ -2,12 +2,10 @@
 
 extern crate core;
 
-use core::alloc::{Alloc, Layout};
+use core::alloc::Layout;
 use core::{mem, ptr};
 use std::alloc;
-use std::alloc::Global;
 use std::cell::Cell;
-use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::usize;
@@ -28,7 +26,7 @@ macro_rules! cacheline_pad {
 #[repr(C)]
 pub struct Buffer<T> {
     /// A pointer to the allocated ring buffer
-    buffer: NonNull<T>,
+    buffer: *mut T,
 
     /// The bounded size as specified by the user.  If the queue reaches capacity, it will block
     /// until values are poppped off.
@@ -219,7 +217,6 @@ impl<T> Buffer<T> {
     #[inline]
     unsafe fn load(&self, pos: usize) -> &T {
         &*self.buffer
-            .as_ptr()
             .offset((pos & (self.allocated_size - 1)) as isize)
     }
 
@@ -232,7 +229,6 @@ impl<T> Buffer<T> {
     #[inline]
     unsafe fn store(&self, pos: usize, v: T) {
         let end = self.buffer
-            .as_ptr()
             .offset((pos & (self.allocated_size - 1)) as isize);
         ptr::write(&mut *end, v);
     }
@@ -253,7 +249,7 @@ impl<T> Drop for Buffer<T> {
                 self.allocated_size * mem::size_of::<T>(),
                 mem::align_of::<T>(),
             ).unwrap();
-            Global.dealloc(self.buffer.as_opaque(), layout);
+            alloc::dealloc(self.buffer as *mut u8, layout);
         }
     }
 }
@@ -339,16 +335,18 @@ pub fn make<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
 }
 
 /// Allocates a memory buffer on the heap and returns a pointer to it
-unsafe fn allocate_buffer<T>(capacity: usize) -> NonNull<T> {
+unsafe fn allocate_buffer<T>(capacity: usize) -> *mut T {
     let adjusted_size = capacity.next_power_of_two();
     let size = adjusted_size
         .checked_mul(mem::size_of::<T>())
         .expect("capacity overflow");
 
     let layout = Layout::from_size_align(size, mem::align_of::<T>()).unwrap();
-    match Global.alloc(layout) {
-        Ok(ptr) => ptr.cast(),
-        Err(_) => alloc::oom(),
+    let ptr = alloc::alloc(layout);
+    if ptr.is_null() {
+        alloc::handle_alloc_error(layout)
+    } else {
+        ptr as *mut T
     }
 }
 
