@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["make","Creates a new SPSC Queue, returning a Producer and Consumer handle"]],"struct":[["Buffer","The internal memory buffer used by the queue."],["Consumer","A handle to the queue which allows consuming values from the buffer"],["Producer","A handle to the queue which allows adding values onto the buffer"]]});
