@@ -244,12 +244,14 @@ impl<T> Drop for Buffer<T> {
         // since this is the destructor, there shouldn't be any contention... so meh?
         while let Some(_) = self.try_pop() {}
 
-        unsafe {
-            let layout = Layout::from_size_align(
-                self.allocated_size * mem::size_of::<T>(),
-                mem::align_of::<T>(),
-            ).unwrap();
-            alloc::dealloc(self.buffer as *mut u8, layout);
+        if mem::size_of::<T>() > 0 {
+            unsafe {
+                let layout = Layout::from_size_align(
+                    self.allocated_size * mem::size_of::<T>(),
+                    mem::align_of::<T>(),
+                ).unwrap();
+                alloc::dealloc(self.buffer as *mut u8, layout);
+            }
         }
     }
 }
@@ -342,11 +344,17 @@ unsafe fn allocate_buffer<T>(capacity: usize) -> *mut T {
         .expect("capacity overflow");
 
     let layout = Layout::from_size_align(size, mem::align_of::<T>()).unwrap();
-    let ptr = alloc::alloc(layout);
+
+    let ptr = if size > 0 {
+        alloc::alloc(layout) as *mut T
+    } else {
+        mem::align_of::<T>() as *mut T
+    };
+
     if ptr.is_null() {
         alloc::handle_alloc_error(layout)
     } else {
-        ptr as *mut T
+        ptr
     }
 }
 
