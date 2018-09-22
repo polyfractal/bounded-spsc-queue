@@ -17,7 +17,9 @@ criterion_group!(
     bench_threaded_chan,
     bench_threaded_spsc,
     bench_threaded_reverse_chan,
-    bench_threaded_reverse_spsc
+    bench_threaded_reverse_spsc,
+    bench_pop_n,
+
 );
 criterion_main!(benches);
 
@@ -166,4 +168,55 @@ fn bench_spsc_threaded2(b: &mut Bencher) {
     for _ in 0..400 {
         c.try_pop();
     }
+}
+
+fn bench_pop_n(b: &mut Criterion) {
+    b.bench_function("pop_n_via_pop", |b| {
+        b.iter_with_setup(
+            || {
+                let (p, c) = bounded_spsc_queue::make(500);
+                for i in 0 .. 500 {
+                    p.push(i)
+                }
+                c
+            },
+            |c| {
+                for _ in 0 .. 500 {
+                    c.pop();
+                }
+
+            },
+        )
+    });
+
+    b.bench_function("pop_n", |b| {
+        let mut buf = [0; 500];
+        b.iter_with_setup(
+            || {
+                let (p, c) = bounded_spsc_queue::make(500);
+                for i in 0 .. 500 {
+                    p.push(i)
+                }
+                c
+            },
+            |c| {
+                c.pop_n(&mut buf)
+            },
+        )
+    });
+
+    b.bench_function("pop_n_overlapping", |b| {
+        let mut buf = [0; 500];
+        let (p, c) = bounded_spsc_queue::make(500);
+        b.iter_with_setup(
+            || {
+                for i in 0 .. 500 {
+                    p.push(i)
+                }
+            },
+            move |_| {
+                c.pop_n(&mut buf)
+            },
+        )
+    });
 }
