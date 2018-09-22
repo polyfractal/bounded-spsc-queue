@@ -1,5 +1,3 @@
-#![feature(allocator_api)]
-
 extern crate core;
 
 use core::alloc::Layout;
