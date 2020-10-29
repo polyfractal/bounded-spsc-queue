@@ -6,6 +6,7 @@ use core::alloc::Layout;
 use core::{mem, ptr};
 use std::alloc;
 use std::cell::Cell;
+use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::usize;
@@ -52,14 +53,33 @@ pub struct Buffer<T> {
     _padding3: [usize; cacheline_pad!(2)],
 }
 
+impl<T> fmt::Debug for Buffer<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let head = self.head.load(Ordering::Relaxed);
+        let tail = self.tail.load(Ordering::Relaxed);
+        let shead = self.shadow_head.get();
+
+        f.debug_struct("SPSC Buffer")
+            .field("buffer_addr:", &self.buffer)
+            .field("capacity:", &self.capacity)
+            .field("allocated_size:", &self.allocated_size)
+            .field("consumer_head:", &head)
+            .field("producer_tail:", &tail)
+            .field("shadow_head:", &shead)
+            .finish()
+    }
+}
+
 unsafe impl<T: Sync> Sync for Buffer<T> {}
 
 /// A handle to the queue which allows consuming values from the buffer
+#[derive(Debug)]
 pub struct Consumer<T> {
     buffer: Arc<Buffer<T>>,
 }
 
 /// A handle to the queue which allows adding values onto the buffer
+#[derive(Debug)]
 pub struct Producer<T> {
     buffer: Arc<Buffer<T>>,
 }
