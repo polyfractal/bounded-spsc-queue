@@ -244,13 +244,13 @@ impl<T> Drop for Buffer<T> {
         // since this is the destructor, there shouldn't be any contention... so meh?
         while let Some(_) = self.try_pop() {}
 
-        unsafe {
+        
             let layout = Layout::from_size_align(
                 self.allocated_size * mem::size_of::<T>(),
                 mem::align_of::<T>(),
             ).unwrap();
-            alloc::dealloc(self.buffer as *mut u8, layout);
-        }
+            unsafe { alloc::dealloc(self.buffer as *mut u8, layout) };
+        
     }
 }
 
