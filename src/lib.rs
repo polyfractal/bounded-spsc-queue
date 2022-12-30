@@ -216,8 +216,7 @@ impl<T> Buffer<T> {
     /// buffer wrapping is handled inside the method.
     #[inline]
     unsafe fn load(&self, pos: usize) -> &T {
-        &*self.buffer
-            .offset((pos & (self.allocated_size - 1)) as isize)
+        &*self.buffer.add(pos & (self.allocated_size - 1))
     }
 
     /// Store a value in the buffer
@@ -228,8 +227,7 @@ impl<T> Buffer<T> {
     /// - Initialized a valid block of memory
     #[inline]
     unsafe fn store(&self, pos: usize, v: T) {
-        let end = self.buffer
-            .offset((pos & (self.allocated_size - 1)) as isize);
+        let end = self.buffer.add(pos & (self.allocated_size - 1));
         ptr::write(&mut *end, v);
     }
 }
@@ -242,13 +240,14 @@ impl<T> Drop for Buffer<T> {
 
         // TODO this could be optimized to avoid the atomic operations / book-keeping...but
         // since this is the destructor, there shouldn't be any contention... so meh?
-        while let Some(_) = self.try_pop() {}
+        while self.try_pop().is_some() {}
 
         unsafe {
             let layout = Layout::from_size_align(
                 self.allocated_size * mem::size_of::<T>(),
                 mem::align_of::<T>(),
-            ).unwrap();
+            )
+            .unwrap();
             alloc::dealloc(self.buffer as *mut u8, layout);
         }
     }
@@ -328,9 +327,7 @@ pub fn make<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
         Producer {
             buffer: arc.clone(),
         },
-        Consumer {
-            buffer: arc.clone(),
-        },
+        Consumer { buffer: arc },
     )
 }
 
@@ -406,7 +403,7 @@ impl<T> Producer<T> {
     /// assert!(producer.capacity() == 100);
     /// ```
     pub fn capacity(&self) -> usize {
-        (*self.buffer).capacity
+        self.buffer.capacity
     }
 
     /// Returns the current size of the queue
@@ -424,7 +421,7 @@ impl<T> Producer<T> {
     /// assert!(producer.size() == 1);
     /// ```
     pub fn size(&self) -> usize {
-        (*self.buffer).tail.load(Ordering::Acquire) - (*self.buffer).head.load(Ordering::Acquire)
+        self.buffer.tail.load(Ordering::Acquire) - self.buffer.head.load(Ordering::Acquire)
     }
 
     /// Returns the available space in the queue
@@ -528,7 +525,7 @@ impl<T> Consumer<T> {
     /// assert!(producer.capacity() == 100);
     /// ```
     pub fn capacity(&self) -> usize {
-        (*self.buffer).capacity
+        self.buffer.capacity
     }
 
     /// Returns the current size of the queue
@@ -548,7 +545,7 @@ impl<T> Consumer<T> {
     /// assert!(producer.size() == 9);
     /// ```
     pub fn size(&self) -> usize {
-        (*self.buffer).tail.load(Ordering::Acquire) - (*self.buffer).head.load(Ordering::Acquire)
+        self.buffer.tail.load(Ordering::Acquire) - self.buffer.head.load(Ordering::Acquire)
     }
 }
 
@@ -644,7 +641,7 @@ mod tests {
             Some(v) => {
                 assert!(v == 10);
             }
-            None => assert!(false, "Queue should not have accepted another write!"),
+            None => panic!("Queue should not have accepted another write!"),
         }
     }
 
@@ -652,21 +649,19 @@ mod tests {
     fn test_try_poll() {
         let (p, c) = super::make(10);
 
-        match c.try_pop() {
-            Some(_) => assert!(false, "Queue was empty but a value was read!"),
-            None => {}
+        if c.try_pop().is_some() {
+            panic!("Queue was empty but a value was read!");
         }
 
         p.push(123);
 
         match c.try_pop() {
             Some(v) => assert!(v == 123),
-            None => assert!(false, "Queue was not empty but poll() returned nothing!"),
+            None => panic!("Queue was not empty but poll() returned nothing!"),
         }
 
-        match c.try_pop() {
-            Some(_) => assert!(false, "Queue was empty but a value was read!"),
-            None => {}
+        if c.try_pop().is_some() {
+            panic!("Queue was empty but a value was read!");
         }
     }
 
@@ -737,5 +732,4 @@ mod tests {
             (start.to(end)).num_nanoseconds().unwrap()
         );
     }
-
 }
