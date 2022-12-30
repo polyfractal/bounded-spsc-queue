@@ -60,7 +60,7 @@ fn bench_chan_threaded(b: &mut Bencher) {
 
     let flag_clone = arc_flag.clone();
     thread::spawn(move || {
-        while flag_clone.load(Ordering::Acquire) == false {
+        while !flag_clone.load(Ordering::Acquire) {
             // Try to do as much work as possible without checking the atomic
             for _ in 0..400 {
                 rx.recv().unwrap();
@@ -70,7 +70,7 @@ fn bench_chan_threaded(b: &mut Bencher) {
 
     b.iter(|| tx.send(1));
 
-    let flag_clone = arc_flag.clone();
+    let flag_clone = arc_flag;
     flag_clone.store(true, Ordering::Release);
 
     // We have to loop a minimum of 400 times to guarantee the other thread shuts down
@@ -86,7 +86,7 @@ fn bench_chan_threaded2(b: &mut Bencher) {
 
     let flag_clone = arc_flag.clone();
     thread::spawn(move || {
-        while flag_clone.load(Ordering::Acquire) == false {
+        while !flag_clone.load(Ordering::Acquire) {
             // Try to do as much work as possible without checking the atomic
             for _ in 0..400 {
                 let _ = tx.send(1);
@@ -96,7 +96,7 @@ fn bench_chan_threaded2(b: &mut Bencher) {
 
     b.iter(|| rx.recv().unwrap());
 
-    let flag_clone = arc_flag.clone();
+    let flag_clone = arc_flag;
     flag_clone.store(true, Ordering::Release);
 
     // We have to loop a minimum of 400 times to guarantee the other thread shuts down
@@ -122,7 +122,7 @@ fn bench_spsc_threaded(b: &mut Bencher) {
 
     let flag_clone = arc_flag.clone();
     thread::spawn(move || {
-        while flag_clone.load(Ordering::Acquire) == false {
+        while !flag_clone.load(Ordering::Acquire) {
             // Try to do as much work as possible without checking the atomic
             for _ in 0..400 {
                 c.pop();
@@ -132,7 +132,7 @@ fn bench_spsc_threaded(b: &mut Bencher) {
 
     b.iter(|| p.push(1));
 
-    let flag_clone = arc_flag.clone();
+    let flag_clone = arc_flag;
     flag_clone.store(true, Ordering::Release);
 
     // We have to loop a minimum of 400 times to guarantee the other thread shuts down
@@ -149,7 +149,7 @@ fn bench_spsc_threaded2(b: &mut Bencher) {
 
     let flag_clone = arc_flag.clone();
     thread::spawn(move || {
-        while flag_clone.load(Ordering::Acquire) == false {
+        while !flag_clone.load(Ordering::Acquire) {
             // Try to do as much work as possible without checking the atomic
             for _ in 0..400 {
                 p.push(1);
@@ -159,7 +159,7 @@ fn bench_spsc_threaded2(b: &mut Bencher) {
 
     b.iter(|| c.pop());
 
-    let flag_clone = arc_flag.clone();
+    let flag_clone = arc_flag;
     flag_clone.store(true, Ordering::Release);
 
     // We have to loop a minimum of 400 times to guarantee the other thread shuts down
